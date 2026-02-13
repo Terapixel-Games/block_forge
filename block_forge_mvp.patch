@@ -1,0 +1,1582 @@
+﻿diff --git "a/C:\\code\\block_forge\\.tmp_project_old.godot" b/project.godot
+index cabe1bb..5348650 100644
+--- "a/C:\\code\\block_forge\\.tmp_project_old.godot"
++++ b/project.godot
+@@ -11,9 +11,18 @@ config_version=5
+ [application]
+ 
+ config/name="Block Forge"
++run/main_scene="res://src/scenes/Boot.tscn"
+ config/features=PackedStringArray("4.5", "Mobile")
+ config/icon="res://icon.svg"
+ 
++[autoload]
++
++SaveStore="*res://src/data/SaveStore.gd"
++RunManager="*res://src/core/RunManager.gd"
++AdManager="*res://src/ads/AdManager.gd"
++MusicManager="*res://src/core/MusicManager.gd"
++VFXManager="*res://src/core/VFXManager.gd"
++
+ [rendering]
+ 
+-renderer/rendering_method="mobile"
+\ No newline at end of file
++renderer/rendering_method="mobile"
+diff --git a/src/core/RunManager.gd b/src/core/RunManager.gd
+new file mode 100644
+index 0000000..803a0a6
+--- /dev/null
++++ b/src/core/RunManager.gd
+@@ -0,0 +1,53 @@
++extends Node
++
++const MENU_SCENE := "res://src/scenes/Menu.tscn"
++const GAME_SCENE := "res://src/scenes/Game.tscn"
++const RESULTS_SCENE := "res://src/scenes/Results.tscn"
++
++const BlockForgeRules := preload("res://src/games/block_forge/BlockForgeRules.gd")
++
++var last_score: int = 0
++var _last_run_state: Dictionary = {}
++var _pending_game_state: Dictionary = {}
++
++func goto_menu() -> void:
++	get_tree().change_scene_to_file(MENU_SCENE)
++
++func start_block_forge() -> void:
++	_pending_game_state.clear()
++	_last_run_state.clear()
++	get_tree().change_scene_to_file(GAME_SCENE)
++
++func end_block_forge(score: int) -> void:
++	last_score = score
++	SaveStore.set_high_score(score)
++	AdManager.on_game_finished()
++	goto_results()
++
++func goto_results() -> void:
++	get_tree().change_scene_to_file(RESULTS_SCENE)
++
++func cache_block_forge_state(state: Dictionary) -> void:
++	_last_run_state = state.duplicate(true)
++
++func consume_pending_block_forge_state() -> Dictionary:
++	var snapshot := _pending_game_state.duplicate(true)
++	_pending_game_state.clear()
++	return snapshot
++
++func can_continue_current_run() -> bool:
++	if _last_run_state.is_empty():
++		return false
++	return not bool(_last_run_state.get("revive_used", false))
++
++func continue_block_forge_after_reward() -> bool:
++	if not can_continue_current_run():
++		return false
++	var resumed_state: Dictionary = _last_run_state.duplicate(true)
++	var revive_result: Dictionary = BlockForgeRules.apply_revive(resumed_state.get("board", []), 10)
++	resumed_state["board"] = revive_result.get("board", resumed_state.get("board", []))
++	resumed_state["revive_used"] = true
++	_last_run_state = resumed_state.duplicate(true)
++	_pending_game_state = resumed_state.duplicate(true)
++	get_tree().change_scene_to_file(GAME_SCENE)
++	return true
+diff --git a/src/core/MusicManager.gd b/src/core/MusicManager.gd
+new file mode 100644
+index 0000000..d07d20a
+--- /dev/null
++++ b/src/core/MusicManager.gd
+@@ -0,0 +1,7 @@
++extends Node
++
++func set_ads_paused(_paused: bool) -> void:
++	pass
++
++func set_ads_ducked(_ducked: bool) -> void:
++	pass
+diff --git a/src/core/VFXManager.gd b/src/core/VFXManager.gd
+new file mode 100644
+index 0000000..61510e1
+--- /dev/null
++++ b/src/core/VFXManager.gd
+@@ -0,0 +1 @@
++extends Node
+diff --git a/src/data/SaveStore.gd b/src/data/SaveStore.gd
+new file mode 100644
+index 0000000..cebf7d3
+--- /dev/null
++++ b/src/data/SaveStore.gd
+@@ -0,0 +1,56 @@
++extends Node
++
++const SAVE_PATH := "user://block_forge_save.json"
++const DEFAULT_DATA := {
++	"block_forge_high_score": 0,
++	"games_played": 0,
++}
++
++var data: Dictionary = DEFAULT_DATA.duplicate(true)
++var _initialized: bool = false
++
++func _ready() -> void:
++	initialize()
++
++func initialize() -> void:
++	if _initialized:
++		return
++	_initialized = true
++	load_save()
++
++func load_save() -> void:
++	data = DEFAULT_DATA.duplicate(true)
++	if not FileAccess.file_exists(SAVE_PATH):
++		save()
++		return
++	var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
++	if file == null:
++		return
++	var parsed: Variant = JSON.parse_string(file.get_as_text())
++	file.close()
++	if parsed is Dictionary:
++		for key in DEFAULT_DATA.keys():
++			if parsed.has(key):
++				data[key] = int(parsed[key])
++
++func save() -> void:
++	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
++	if file == null:
++		return
++	file.store_string(JSON.stringify(data))
++	file.close()
++
++func set_high_score(score: int) -> void:
++	if score > get_high_score():
++		data["block_forge_high_score"] = score
++		save()
++
++func increment_games_played() -> void:
++	data["games_played"] = get_games_played() + 1
++	save()
++
++func get_high_score() -> int:
++	return int(data.get("block_forge_high_score", 0))
++
++func get_games_played() -> int:
++	return int(data.get("games_played", 0))
+diff --git a/src/ads/AdManager.gd b/src/ads/AdManager.gd
+new file mode 100644
+index 0000000..80e0986
+--- /dev/null
++++ b/src/ads/AdManager.gd
+@@ -0,0 +1,66 @@
++extends Node
++
++signal rewarded_earned
++signal rewarded_closed
++
++const APP_ID := "ca-app-pub-8413230766502262~4431975968"
++const INTERSTITIAL_ID := "ca-app-pub-8413230766502262/9772756961"
++const REWARDED_ID := "ca-app-pub-8413230766502262/3231399348"
++
++const MockAdProviderScript := preload("res://src/ads/MockAdProvider.gd")
++const AdmobProviderScript := preload("res://src/ads/AdmobProvider.gd")
++
++var _provider: Node
++var _rewarded_request_active: bool = false
++
++func _ready() -> void:
++	if Engine.has_singleton("AdmobPlugin"):
++		_provider = AdmobProviderScript.new()
++	else:
++		_provider = MockAdProviderScript.new()
++	add_child(_provider)
++	_provider.call("configure", APP_ID, INTERSTITIAL_ID, REWARDED_ID)
++	_provider.connect("interstitial_closed", Callable(self, "_on_interstitial_closed"))
++	_provider.connect("rewarded_earned", Callable(self, "_on_rewarded_earned"))
++	_provider.connect("rewarded_closed", Callable(self, "_on_rewarded_closed"))
++	_provider.call("load_interstitial", INTERSTITIAL_ID)
++	_provider.call("load_rewarded", REWARDED_ID)
++
++func on_game_finished() -> void:
++	SaveStore.increment_games_played()
++	maybe_show_interstitial()
++
++func maybe_show_interstitial() -> void:
++	if _provider == null:
++		return
++	var games_played: int = SaveStore.get_games_played()
++	if games_played <= 0 or games_played % 3 != 0:
++		return
++	var shown: bool = bool(_provider.call("show_interstitial", INTERSTITIAL_ID))
++	if not shown:
++		_provider.call("load_interstitial", INTERSTITIAL_ID)
++
++func show_rewarded_continue() -> bool:
++	if _provider == null:
++		return false
++	if _rewarded_request_active:
++		return false
++	_rewarded_request_active = true
++	var shown: bool = bool(_provider.call("show_rewarded", REWARDED_ID))
++	if not shown:
++		_rewarded_request_active = false
++		_provider.call("load_rewarded", REWARDED_ID)
++	return shown
++
++func _on_interstitial_closed() -> void:
++	if _provider != null:
++		_provider.call("load_interstitial", INTERSTITIAL_ID)
++
++func _on_rewarded_earned() -> void:
++	emit_signal("rewarded_earned")
++
++func _on_rewarded_closed() -> void:
++	_rewarded_request_active = false
++	if _provider != null:
++		_provider.call("load_rewarded", REWARDED_ID)
++	emit_signal("rewarded_closed")
+diff --git a/src/ads/AdmobProvider.gd b/src/ads/AdmobProvider.gd
+new file mode 100644
+index 0000000..bb15f77
+--- /dev/null
++++ b/src/ads/AdmobProvider.gd
+@@ -0,0 +1,132 @@
++extends Node
++class_name AdmobProvider
++
++signal interstitial_loaded
++signal interstitial_closed
++signal rewarded_loaded
++signal rewarded_earned
++signal rewarded_closed
++
++const ANDROID_DEBUG_APP_ID: String = "ca-app-pub-3940256099942544~3347511713"
++const ANDROID_DEBUG_INTERSTITIAL_ID: String = "ca-app-pub-3940256099942544/1033173712"
++const ANDROID_DEBUG_REWARDED_ID: String = "ca-app-pub-3940256099942544/5224354917"
++const IOS_DEBUG_APP_ID: String = "ca-app-pub-3940256099942544~1458002511"
++const IOS_DEBUG_INTERSTITIAL_ID: String = "ca-app-pub-3940256099942544/4411468910"
++const IOS_DEBUG_REWARDED_ID: String = "ca-app-pub-3940256099942544/1712485313"
++
++var admob: Node
++var _initialized: bool = false
++var _interstitial_ready: bool = false
++var _rewarded_ready: bool = false
++var _pending_interstitial_load: bool = false
++var _pending_rewarded_load: bool = false
++
++func configure(app_id: String, interstitial_id: String, rewarded_id: String) -> void:
++	if admob != null:
++		return
++	var admob_script: Script = load("res://addons/AdmobPlugin/Admob.gd") as Script
++	if admob_script == null:
++		push_warning("AdmobProvider: Admob plugin script is missing.")
++		return
++	admob = admob_script.new()
++	var use_real_ids: bool = not OS.is_debug_build()
++	_set_if_exists(admob, "is_real", use_real_ids)
++	_set_if_exists(admob, "android_real_application_id", app_id)
++	_set_if_exists(admob, "ios_real_application_id", app_id)
++	_set_if_exists(admob, "android_debug_application_id", ANDROID_DEBUG_APP_ID)
++	_set_if_exists(admob, "ios_debug_application_id", IOS_DEBUG_APP_ID)
++	_set_if_exists(admob, "android_real_interstitial_id", interstitial_id)
++	_set_if_exists(admob, "ios_real_interstitial_id", interstitial_id)
++	_set_if_exists(admob, "android_debug_interstitial_id", ANDROID_DEBUG_INTERSTITIAL_ID)
++	_set_if_exists(admob, "ios_debug_interstitial_id", IOS_DEBUG_INTERSTITIAL_ID)
++	_set_if_exists(admob, "android_real_rewarded_id", rewarded_id)
++	_set_if_exists(admob, "ios_real_rewarded_id", rewarded_id)
++	_set_if_exists(admob, "android_debug_rewarded_id", ANDROID_DEBUG_REWARDED_ID)
++	_set_if_exists(admob, "ios_debug_rewarded_id", IOS_DEBUG_REWARDED_ID)
++	add_child(admob)
++	admob.connect("initialization_completed", Callable(self, "_on_initialized"))
++	admob.connect("interstitial_ad_loaded", Callable(self, "_on_interstitial_loaded"))
++	admob.connect("interstitial_ad_failed_to_load", Callable(self, "_on_interstitial_failed_to_load"))
++	admob.connect("interstitial_ad_dismissed_full_screen_content", Callable(self, "_on_interstitial_closed"))
++	admob.connect("rewarded_ad_loaded", Callable(self, "_on_rewarded_loaded"))
++	admob.connect("rewarded_ad_failed_to_load", Callable(self, "_on_rewarded_failed_to_load"))
++	admob.connect("rewarded_ad_user_earned_reward", Callable(self, "_on_rewarded_earned"))
++	admob.connect("rewarded_ad_dismissed_full_screen_content", Callable(self, "_on_rewarded_closed"))
++	if admob.has_method("initialize"):
++		admob.call("initialize")
++
++func load_interstitial(_ad_unit_id: String) -> void:
++	if admob == null:
++		return
++	if not _initialized:
++		_pending_interstitial_load = true
++		return
++	if admob.has_method("load_interstitial_ad"):
++		admob.call("load_interstitial_ad")
++
++func load_rewarded(_ad_unit_id: String) -> void:
++	if admob == null:
++		return
++	if not _initialized:
++		_pending_rewarded_load = true
++		return
++	if admob.has_method("load_rewarded_ad"):
++		admob.call("load_rewarded_ad")
++
++func show_interstitial(_ad_unit_id: String) -> bool:
++	if admob == null or not _interstitial_ready:
++		return false
++	_interstitial_ready = false
++	if admob.has_method("show_interstitial_ad"):
++		admob.call("show_interstitial_ad")
++		return true
++	return false
++
++func show_rewarded(_ad_unit_id: String) -> bool:
++	if admob == null or not _rewarded_ready:
++		return false
++	_rewarded_ready = false
++	if admob.has_method("show_rewarded_ad"):
++		admob.call("show_rewarded_ad")
++		return true
++	return false
++
++func _on_interstitial_loaded(_ad_info, _response_info = null) -> void:
++	_interstitial_ready = true
++	emit_signal("interstitial_loaded")
++
++func _on_interstitial_failed_to_load(_ad_info, _error_data) -> void:
++	_interstitial_ready = false
++
++func _on_interstitial_closed(_ad_info) -> void:
++	_interstitial_ready = false
++	emit_signal("interstitial_closed")
++
++func _on_rewarded_loaded(_ad_info, _response_info = null) -> void:
++	_rewarded_ready = true
++	emit_signal("rewarded_loaded")
++
++func _on_rewarded_failed_to_load(_ad_info, _error_data) -> void:
++	_rewarded_ready = false
++
++func _on_rewarded_earned(_ad_info, _reward_data) -> void:
++	emit_signal("rewarded_earned")
++
++func _on_rewarded_closed(_ad_info) -> void:
++	_rewarded_ready = false
++	emit_signal("rewarded_closed")
++
++func _on_initialized(_status_data = null) -> void:
++	_initialized = true
++	if _pending_interstitial_load:
++		_pending_interstitial_load = false
++		load_interstitial("")
++	if _pending_rewarded_load:
++		_pending_rewarded_load = false
++		load_rewarded("")
++
++func _set_if_exists(target: Object, property_name: String, value: Variant) -> void:
++	for property_data in target.get_property_list():
++		if String(property_data.get("name", "")) == property_name:
++			target.set(property_name, value)
++			return
+diff --git a/src/ads/MockAdProvider.gd b/src/ads/MockAdProvider.gd
+new file mode 100644
+index 0000000..71c3ed8
+--- /dev/null
++++ b/src/ads/MockAdProvider.gd
+@@ -0,0 +1,46 @@
++extends Node
++class_name MockAdProvider
++
++signal interstitial_loaded
++signal interstitial_closed
++signal rewarded_loaded
++signal rewarded_earned
++signal rewarded_closed
++
++var _interstitial_ready: bool = true
++var _rewarded_ready: bool = true
++
++func configure(_app_id: String, _interstitial_id: String, _rewarded_id: String) -> void:
++	pass
++
++func load_interstitial(_ad_unit_id: String) -> void:
++	_interstitial_ready = true
++	emit_signal("interstitial_loaded")
++
++func load_rewarded(_ad_unit_id: String) -> void:
++	_rewarded_ready = true
++	emit_signal("rewarded_loaded")
++
++func show_interstitial(_ad_unit_id: String) -> bool:
++	if not _interstitial_ready:
++		return false
++	_interstitial_ready = false
++	call_deferred("_emit_interstitial_closed")
++	return true
++
++func show_rewarded(_ad_unit_id: String) -> bool:
++	if not _rewarded_ready:
++		return false
++	_rewarded_ready = false
++	call_deferred("_emit_rewarded_earned")
++	call_deferred("_emit_rewarded_closed")
++	return true
++
++func _emit_interstitial_closed() -> void:
++	emit_signal("interstitial_closed")
++
++func _emit_rewarded_earned() -> void:
++	emit_signal("rewarded_earned")
++
++func _emit_rewarded_closed() -> void:
++	emit_signal("rewarded_closed")
+diff --git a/src/games/block_forge/BlockForgePieces.gd b/src/games/block_forge/BlockForgePieces.gd
+new file mode 100644
+index 0000000..ab613c8
+--- /dev/null
++++ b/src/games/block_forge/BlockForgePieces.gd
+@@ -0,0 +1,59 @@
++extends RefCounted
++
++const PIECE_LIBRARY: Array = [
++	{"id": "single", "cells": [Vector2i(0, 0)]},
++	{"id": "line_2_h", "cells": [Vector2i(0, 0), Vector2i(1, 0)]},
++	{"id": "line_2_v", "cells": [Vector2i(0, 0), Vector2i(0, 1)]},
++	{"id": "line_3_h", "cells": [Vector2i(0, 0), Vector2i(1, 0), Vector2i(2, 0)]},
++	{"id": "line_3_v", "cells": [Vector2i(0, 0), Vector2i(0, 1), Vector2i(0, 2)]},
++	{"id": "line_4_h", "cells": [Vector2i(0, 0), Vector2i(1, 0), Vector2i(2, 0), Vector2i(3, 0)]},
++	{"id": "line_4_v", "cells": [Vector2i(0, 0), Vector2i(0, 1), Vector2i(0, 2), Vector2i(0, 3)]},
++	{"id": "square_2", "cells": [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]},
++	{"id": "l_3_a", "cells": [Vector2i(0, 0), Vector2i(0, 1), Vector2i(1, 1)]},
++	{"id": "l_3_b", "cells": [Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]},
++	{"id": "l_3_c", "cells": [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1)]},
++	{"id": "l_3_d", "cells": [Vector2i(0, 0), Vector2i(1, 0), Vector2i(1, 1)]},
++	{
++		"id": "square_3_hole",
++		"cells": [
++			Vector2i(0, 0), Vector2i(1, 0), Vector2i(2, 0),
++			Vector2i(0, 1), Vector2i(2, 1),
++			Vector2i(0, 2), Vector2i(1, 2), Vector2i(2, 2),
++		]
++	},
++]
++
++static func random_piece(rng: RandomNumberGenerator) -> Dictionary:
++	return _clone_piece(PIECE_LIBRARY[rng.randi_range(0, PIECE_LIBRARY.size() - 1)])
++
++static func piece_by_id(id: String) -> Dictionary:
++	for piece in PIECE_LIBRARY:
++		if str(piece.get("id", "")) == id:
++			return _clone_piece(piece)
++	return _clone_piece(PIECE_LIBRARY[0])
++
++static func bounds(piece: Dictionary) -> Vector2i:
++	var max_x: int = 0
++	var max_y: int = 0
++	for cell_variant in piece.get("cells", []):
++		var cell: Vector2i = _to_vec2i(cell_variant)
++		max_x = max(max_x, cell.x)
++		max_y = max(max_y, cell.y)
++	return Vector2i(max_x + 1, max_y + 1)
++
++static func _clone_piece(piece: Dictionary) -> Dictionary:
++	var cells_copy: Array = []
++	for cell_variant in piece.get("cells", []):
++		var cell: Vector2i = _to_vec2i(cell_variant)
++		cells_copy.append(Vector2i(cell.x, cell.y))
++	return {"id": str(piece.get("id", "piece")), "cells": cells_copy}
++
++static func _to_vec2i(value: Variant) -> Vector2i:
++	if value is Vector2i:
++		return value
++	if value is Vector2:
++		var v: Vector2 = value
++		return Vector2i(int(v.x), int(v.y))
++	if value is Dictionary:
++		return Vector2i(int(value.get("x", 0)), int(value.get("y", 0)))
++	return Vector2i.ZERO
+diff --git a/src/games/block_forge/BlockForgeRules.gd b/src/games/block_forge/BlockForgeRules.gd
+new file mode 100644
+index 0000000..0915d05
+--- /dev/null
++++ b/src/games/block_forge/BlockForgeRules.gd
+@@ -0,0 +1,169 @@
++extends RefCounted
++
++static func create_board(width: int = 8, height: int = 8) -> Array:
++	var board: Array = []
++	for _y in range(height):
++		var row: Array = []
++		for _x in range(width):
++			row.append(0)
++		board.append(row)
++	return board
++
++static func can_place(board: Array, piece: Dictionary, origin: Vector2i) -> bool:
++	if board.is_empty():
++		return false
++	var cells: Array = piece.get("cells", [])
++	if cells.is_empty():
++		return false
++	var height: int = board.size()
++	var width: int = (board[0] as Array).size()
++	for cell_variant in cells:
++		var cell: Vector2i = _to_vec2i(cell_variant)
++		var x: int = origin.x + cell.x
++		var y: int = origin.y + cell.y
++		if x < 0 or y < 0 or x >= width or y >= height:
++			return false
++		if int(board[y][x]) != 0:
++			return false
++	return true
++
++static func place(board: Array, piece: Dictionary, origin: Vector2i) -> Array:
++	var placed_board: Array = _copy_board(board)
++	if not can_place(placed_board, piece, origin):
++		return placed_board
++	for cell_variant in piece.get("cells", []):
++		var cell: Vector2i = _to_vec2i(cell_variant)
++		var x: int = origin.x + cell.x
++		var y: int = origin.y + cell.y
++		placed_board[y][x] = 1
++	return placed_board
++
++static func find_full_lines(board: Array) -> Dictionary:
++	if board.is_empty():
++		return {"rows": [], "cols": []}
++	var rows: Array = []
++	var cols: Array = []
++	var height: int = board.size()
++	var width: int = (board[0] as Array).size()
++	for y in range(height):
++		var row_full: bool = true
++		for x in range(width):
++			if int(board[y][x]) == 0:
++				row_full = false
++				break
++		if row_full:
++			rows.append(y)
++	for x in range(width):
++		var col_full: bool = true
++		for y in range(height):
++			if int(board[y][x]) == 0:
++				col_full = false
++				break
++		if col_full:
++			cols.append(x)
++	return {"rows": rows, "cols": cols}
++
++static func clear_lines(board: Array) -> Dictionary:
++	var next_board: Array = _copy_board(board)
++	var lines: Dictionary = find_full_lines(next_board)
++	var rows: Array = lines.get("rows", [])
++	var cols: Array = lines.get("cols", [])
++	var width: int = 0
++	var height: int = next_board.size()
++	if height > 0:
++		width = (next_board[0] as Array).size()
++	for row_index_variant in rows:
++		var row_index: int = int(row_index_variant)
++		for x in range(width):
++			next_board[row_index][x] = 0
++	for col_index_variant in cols:
++		var col_index: int = int(col_index_variant)
++		for y in range(height):
++			next_board[y][col_index] = 0
++	return {
++		"board": next_board,
++		"rows": rows.duplicate(),
++		"cols": cols.duplicate(),
++		"count": rows.size() + cols.size(),
++	}
++
++static func any_move_possible(board: Array, tray: Array) -> bool:
++	if board.is_empty():
++		return false
++	var height: int = board.size()
++	var width: int = (board[0] as Array).size()
++	for piece_variant in tray:
++		if not (piece_variant is Dictionary):
++			continue
++		var piece: Dictionary = piece_variant
++		if not piece.has("cells"):
++			continue
++		for y in range(height):
++			for x in range(width):
++				if can_place(board, piece, Vector2i(x, y)):
++					return true
++	return false
++
++static func apply_revive(board: Array, count: int) -> Dictionary:
++	var revived_board: Array = _copy_board(board)
++	var filled_cells: Array = _collect_filled_cells(revived_board)
++	if filled_cells.is_empty() or count <= 0:
++		return {"board": revived_board, "cleared": 0, "cells": []}
++	var rng := RandomNumberGenerator.new()
++	rng.randomize()
++	for i in range(filled_cells.size() - 1, 0, -1):
++		var j: int = rng.randi_range(0, i)
++		var tmp: Variant = filled_cells[i]
++		filled_cells[i] = filled_cells[j]
++		filled_cells[j] = tmp
++	var to_clear: int = min(count, filled_cells.size())
++	var cleared_cells: Array = []
++	for i in range(to_clear):
++		var cell: Vector2i = _to_vec2i(filled_cells[i])
++		revived_board[cell.y][cell.x] = 0
++		cleared_cells.append(cell)
++	return {"board": revived_board, "cleared": to_clear, "cells": cleared_cells}
++
++static func score_for_move(placed_cells: int, cleared_lines: int, combo_streak: int) -> Dictionary:
++	var line_bonus: int = max(0, cleared_lines) * 50
++	var combo_bonus: int = 0
++	if cleared_lines > 0:
++		combo_bonus = max(0, combo_streak) * 25
++	var total: int = max(0, placed_cells) + line_bonus + combo_bonus
++	return {
++		"placed": max(0, placed_cells),
++		"line_bonus": line_bonus,
++		"combo_bonus": combo_bonus,
++		"total": total,
++	}
++
++static func _copy_board(board: Array) -> Array:
++	var copy: Array = []
++	for row_variant in board:
++		if not (row_variant is Array):
++			continue
++		var source_row: Array = row_variant
++		var row: Array = []
++		for cell_variant in source_row:
++			row.append(int(cell_variant))
++		copy.append(row)
++	return copy
++
++static func _collect_filled_cells(board: Array) -> Array:
++	var filled: Array = []
++	for y in range(board.size()):
++		var row: Array = board[y]
++		for x in range(row.size()):
++			if int(row[x]) != 0:
++				filled.append(Vector2i(x, y))
++	return filled
++
++static func _to_vec2i(value: Variant) -> Vector2i:
++	if value is Vector2i:
++		return value
++	if value is Vector2:
++		var v: Vector2 = value
++		return Vector2i(int(v.x), int(v.y))
++	if value is Dictionary:
++		return Vector2i(int(value.get("x", 0)), int(value.get("y", 0)))
++	return Vector2i.ZERO
+diff --git a/src/scenes/Boot.gd b/src/scenes/Boot.gd
+new file mode 100644
+index 0000000..69da4cc
+--- /dev/null
++++ b/src/scenes/Boot.gd
+@@ -0,0 +1,8 @@
++extends Node
++
++func _ready() -> void:
++	SaveStore.initialize()
++	call_deferred("_go_menu")
++
++func _go_menu() -> void:
++	RunManager.goto_menu()
+diff --git a/src/scenes/Boot.tscn b/src/scenes/Boot.tscn
+new file mode 100644
+index 0000000..3ebe660
+--- /dev/null
++++ b/src/scenes/Boot.tscn
+@@ -0,0 +1,6 @@
++[gd_scene load_steps=2 format=3]
++
++[ext_resource type="Script" path="res://src/scenes/Boot.gd" id="1"]
++
++[node name="Boot" type="Node"]
++script = ExtResource("1")
+diff --git a/src/scenes/Menu.gd b/src/scenes/Menu.gd
+new file mode 100644
+index 0000000..37825e1
+--- /dev/null
++++ b/src/scenes/Menu.gd
+@@ -0,0 +1,13 @@
++extends Control
++
++@onready var quit_button: Button = $Center/Panel/VBox/QuitButton
++
++func _ready() -> void:
++	if OS.has_feature("web"):
++		quit_button.visible = false
++
++func _on_start_pressed() -> void:
++	RunManager.start_block_forge()
++
++func _on_quit_pressed() -> void:
++	get_tree().quit()
+diff --git a/src/scenes/Menu.tscn b/src/scenes/Menu.tscn
+new file mode 100644
+index 0000000..eb5dc68
+--- /dev/null
++++ b/src/scenes/Menu.tscn
+@@ -0,0 +1,75 @@
++[gd_scene load_steps=2 format=3]
++
++[ext_resource type="Script" path="res://src/scenes/Menu.gd" id="1"]
++
++[node name="Menu" type="Control"]
++layout_mode = 3
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++grow_horizontal = 2
++grow_vertical = 2
++script = ExtResource("1")
++
++[node name="Background" type="ColorRect" parent="."]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++grow_horizontal = 2
++grow_vertical = 2
++color = Color(0.07, 0.11, 0.16, 1)
++
++[node name="Center" type="CenterContainer" parent="."]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++grow_horizontal = 2
++grow_vertical = 2
++
++[node name="Panel" type="Panel" parent="Center"]
++custom_minimum_size = Vector2(620, 820)
++layout_mode = 2
++self_modulate = Color(0.84, 0.93, 1, 0.78)
++
++[node name="VBox" type="VBoxContainer" parent="Center/Panel"]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++offset_left = 44.0
++offset_top = 44.0
++offset_right = -44.0
++offset_bottom = -44.0
++grow_horizontal = 2
++grow_vertical = 2
++alignment = 1
++theme_override_constants/separation = 26
++
++[node name="Title" type="Label" parent="Center/Panel/VBox"]
++layout_mode = 2
++text = "Block Forge"
++horizontal_alignment = 1
++theme_override_font_sizes/font_size = 88
++
++[node name="Subtitle" type="Label" parent="Center/Panel/VBox"]
++layout_mode = 2
++text = "Fill smart. Clear big."
++horizontal_alignment = 1
++theme_override_font_sizes/font_size = 30
++
++[node name="StartButton" type="Button" parent="Center/Panel/VBox"]
++custom_minimum_size = Vector2(0, 124)
++layout_mode = 2
++theme_override_font_sizes/font_size = 42
++text = "Start"
++
++[node name="QuitButton" type="Button" parent="Center/Panel/VBox"]
++custom_minimum_size = Vector2(0, 116)
++layout_mode = 2
++theme_override_font_sizes/font_size = 34
++text = "Quit"
++
++[connection signal="pressed" from="Center/Panel/VBox/StartButton" to="." method="_on_start_pressed"]
++[connection signal="pressed" from="Center/Panel/VBox/QuitButton" to="." method="_on_quit_pressed"]
+diff --git a/src/scenes/BlockForgeGame.gd b/src/scenes/BlockForgeGame.gd
+new file mode 100644
+index 0000000..91c982f
+--- /dev/null
++++ b/src/scenes/BlockForgeGame.gd
+@@ -0,0 +1,371 @@
++extends Control
++
++const BOARD_SIZE: int = 8
++const TRAY_SIZE: int = 3
++
++const BlockForgeRules := preload("res://src/games/block_forge/BlockForgeRules.gd")
++const BlockForgePieces := preload("res://src/games/block_forge/BlockForgePieces.gd")
++
++const BOARD_EMPTY_COLOR: Color = Color(0.19, 0.25, 0.33, 1.0)
++const BOARD_FILLED_COLOR: Color = Color(0.62, 0.9, 0.92, 1.0)
++const BOARD_FLASH_COLOR: Color = Color(1.0, 0.98, 0.75, 0.65)
++const TRAY_SELECTED_COLOR: Color = Color(0.85, 1.0, 0.88, 1.0)
++const TRAY_IDLE_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
++const TRAY_USED_COLOR: Color = Color(0.68, 0.68, 0.7, 0.75)
++
++@onready var shake_root: Control = $ShakeRoot
++@onready var board_grid: GridContainer = $ShakeRoot/UI/Main/BoardPanel/BoardPadding/BoardGrid
++@onready var tray_container: HBoxContainer = $ShakeRoot/UI/Main/TrayContainer
++@onready var score_label: Label = $ShakeRoot/UI/Main/TopBar/ScoreLabel
++@onready var combo_label: Label = $ShakeRoot/UI/Main/TopBar/ComboLabel
++@onready var status_label: Label = $ShakeRoot/UI/Main/StatusLabel
++@onready var pause_overlay: Control = $PauseOverlay
++
++var _board: Array = []
++var _tray: Array = []
++var _score: int = 0
++var _combo: int = 0
++var _revive_used: bool = false
++var _selected_piece_index: int = -1
++var _board_buttons: Array = []
++var _tray_buttons: Array = []
++var _input_locked: bool = false
++var _base_shake_pos: Vector2 = Vector2.ZERO
++var _rng := RandomNumberGenerator.new()
++
++func _ready() -> void:
++	_rng.randomize()
++	_base_shake_pos = shake_root.position
++	_build_board_buttons()
++	_build_tray_buttons()
++	_load_run_state()
++	_render_all()
++	_set_status("Select a tray piece.")
++
++func _build_board_buttons() -> void:
++	for child in board_grid.get_children():
++		child.queue_free()
++	_board_buttons.clear()
++	board_grid.columns = BOARD_SIZE
++	for y in range(BOARD_SIZE):
++		for x in range(BOARD_SIZE):
++			var button := Button.new()
++			button.custom_minimum_size = Vector2(62, 62)
++			button.focus_mode = Control.FOCUS_NONE
++			button.flat = true
++			button.text = ""
++			button.add_theme_stylebox_override("normal", _cell_style(Color(0.23, 0.31, 0.42, 0.65)))
++			button.add_theme_stylebox_override("hover", _cell_style(Color(0.34, 0.47, 0.62, 0.8)))
++			button.add_theme_stylebox_override("pressed", _cell_style(Color(0.4, 0.58, 0.76, 0.9)))
++			button.add_theme_stylebox_override("disabled", _cell_style(Color(0.18, 0.24, 0.32, 0.6)))
++			button.pressed.connect(_on_board_cell_pressed.bind(x, y))
++			board_grid.add_child(button)
++			_board_buttons.append(button)
++
++func _build_tray_buttons() -> void:
++	for child in tray_container.get_children():
++		child.queue_free()
++	_tray_buttons.clear()
++	for i in range(TRAY_SIZE):
++		var button := Button.new()
++		button.custom_minimum_size = Vector2(0, 170)
++		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
++		button.focus_mode = Control.FOCUS_NONE
++		button.alignment = HORIZONTAL_ALIGNMENT_CENTER
++		button.vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER
++		button.pressed.connect(_on_tray_piece_pressed.bind(i))
++		tray_container.add_child(button)
++		_tray_buttons.append(button)
++
++func _load_run_state() -> void:
++	var pending_state: Dictionary = RunManager.consume_pending_block_forge_state()
++	if pending_state.is_empty():
++		_board = BlockForgeRules.create_board(BOARD_SIZE, BOARD_SIZE)
++		_tray = _roll_playable_tray()
++		_score = 0
++		_combo = 0
++		_revive_used = false
++		return
++	_board = _sanitize_board(pending_state.get("board", []))
++	_tray = _sanitize_tray(pending_state.get("tray", []))
++	_score = int(pending_state.get("score", 0))
++	_combo = int(pending_state.get("combo", 0))
++	_revive_used = bool(pending_state.get("revive_used", false))
++	if _tray_is_empty():
++		_tray = _roll_playable_tray()
++
++func _sanitize_board(value: Variant) -> Array:
++	if not (value is Array):
++		return BlockForgeRules.create_board(BOARD_SIZE, BOARD_SIZE)
++	var source: Array = value as Array
++	if source.size() != BOARD_SIZE:
++		return BlockForgeRules.create_board(BOARD_SIZE, BOARD_SIZE)
++	var out: Array = []
++	for y in range(BOARD_SIZE):
++		if not (source[y] is Array):
++			return BlockForgeRules.create_board(BOARD_SIZE, BOARD_SIZE)
++		var row_src: Array = source[y] as Array
++		if row_src.size() != BOARD_SIZE:
++			return BlockForgeRules.create_board(BOARD_SIZE, BOARD_SIZE)
++		var row: Array = []
++		for x in range(BOARD_SIZE):
++			row.append(int(row_src[x]))
++		out.append(row)
++	return out
++
++func _sanitize_tray(value: Variant) -> Array:
++	var tray: Array = [{}, {}, {}]
++	if not (value is Array):
++		return tray
++	var source: Array = value as Array
++	for i in range(min(TRAY_SIZE, source.size())):
++		if source[i] is Dictionary and (source[i] as Dictionary).has("cells"):
++			tray[i] = (source[i] as Dictionary).duplicate(true)
++	return tray
++
++func _roll_playable_tray() -> Array:
++	var fallback: Array = [{}, {}, {}]
++	for _attempt in range(32):
++		var candidate: Array = []
++		for _slot in range(TRAY_SIZE):
++			candidate.append(BlockForgePieces.random_piece(_rng))
++		fallback = candidate
++		if BlockForgeRules.any_move_possible(_board, candidate):
++			return candidate
++	return fallback
++
++func _on_tray_piece_pressed(piece_index: int) -> void:
++	if _input_locked or pause_overlay.visible:
++		return
++	if piece_index < 0 or piece_index >= _tray.size():
++		return
++	var piece: Dictionary = _tray[piece_index] as Dictionary
++	if piece.is_empty():
++		return
++	if _selected_piece_index == piece_index:
++		_selected_piece_index = -1
++		_set_status("Piece deselected.")
++	else:
++		_selected_piece_index = piece_index
++		_set_status("Tap a board cell to place this piece.")
++	_render_tray()
++
++func _on_board_cell_pressed(x: int, y: int) -> void:
++	if _input_locked or pause_overlay.visible:
++		return
++	if _selected_piece_index < 0:
++		_set_status("Select a tray piece first.")
++		return
++	var piece: Dictionary = _tray[_selected_piece_index] as Dictionary
++	if piece.is_empty():
++		return
++	var origin := Vector2i(x, y)
++	if not BlockForgeRules.can_place(_board, piece, origin):
++		_bump_cell(x, y)
++		_set_status("Piece does not fit there.")
++		return
++	_commit_move(piece, origin)
++
++func _commit_move(piece: Dictionary, origin: Vector2i) -> void:
++	_input_locked = true
++	var placed_cells: Array = _piece_cells(piece, origin)
++	_board = BlockForgeRules.place(_board, piece, origin)
++	_tray[_selected_piece_index] = {}
++	_selected_piece_index = -1
++	_render_board()
++	await _animate_placement(placed_cells)
++
++	var clear_result: Dictionary = BlockForgeRules.clear_lines(_board)
++	var cleared_lines: int = int(clear_result.get("count", 0))
++	if cleared_lines > 0:
++		_combo += 1
++		var clear_cells: Array = _cells_from_clear_result(clear_result)
++		await _animate_clear(clear_cells)
++		_board = clear_result.get("board", _board)
++		if cleared_lines > 1:
++			await _shake_screen(cleared_lines)
++	else:
++		_combo = 0
++
++	var score_data: Dictionary = BlockForgeRules.score_for_move(placed_cells.size(), cleared_lines, _combo)
++	_score += int(score_data.get("total", 0))
++
++	if _tray_is_empty():
++		_tray = _roll_playable_tray()
++	_render_all()
++	_set_status(_score_breakdown_text(score_data))
++
++	if not BlockForgeRules.any_move_possible(_board, _tray):
++		await get_tree().create_timer(0.18).timeout
++		_finish_run()
++		return
++	_input_locked = false
++
++func _finish_run() -> void:
++	var snapshot := {
++		"board": _board.duplicate(true),
++		"tray": _tray.duplicate(true),
++		"score": _score,
++		"combo": _combo,
++		"revive_used": _revive_used,
++	}
++	RunManager.cache_block_forge_state(snapshot)
++	RunManager.end_block_forge(_score)
++
++func _piece_cells(piece: Dictionary, origin: Vector2i) -> Array:
++	var out: Array = []
++	for cell_variant in piece.get("cells", []):
++		var cell: Vector2i = _to_vec2i(cell_variant)
++		out.append(Vector2i(origin.x + cell.x, origin.y + cell.y))
++	return out
++
++func _cells_from_clear_result(clear_result: Dictionary) -> Array:
++	var unique: Dictionary = {}
++	var rows: Array = clear_result.get("rows", [])
++	var cols: Array = clear_result.get("cols", [])
++	for row_index_variant in rows:
++		var row_index: int = int(row_index_variant)
++		for x in range(BOARD_SIZE):
++			unique["%s:%s" % [x, row_index]] = Vector2i(x, row_index)
++	for col_index_variant in cols:
++		var col_index: int = int(col_index_variant)
++		for y in range(BOARD_SIZE):
++			unique["%s:%s" % [col_index, y]] = Vector2i(col_index, y)
++	return unique.values()
++
++func _render_all() -> void:
++	_render_board()
++	_render_tray()
++	score_label.text = "Score: %d" % _score
++	combo_label.text = "Combo: %d" % _combo
++
++func _render_board() -> void:
++	for y in range(BOARD_SIZE):
++		for x in range(BOARD_SIZE):
++			var button: Button = _board_button(x, y)
++			button.modulate = BOARD_FILLED_COLOR if int(_board[y][x]) != 0 else BOARD_EMPTY_COLOR
++			button.scale = Vector2.ONE
++
++func _render_tray() -> void:
++	for i in range(TRAY_SIZE):
++		var button: Button = _tray_buttons[i]
++		var piece: Dictionary = _tray[i] as Dictionary
++		if piece.is_empty():
++			button.disabled = true
++			button.text = "USED"
++			button.modulate = TRAY_USED_COLOR
++			continue
++		button.disabled = false
++		button.text = _piece_preview_text(piece)
++		button.modulate = TRAY_SELECTED_COLOR if i == _selected_piece_index else TRAY_IDLE_COLOR
++
++func _piece_preview_text(piece: Dictionary) -> String:
++	var bounds: Vector2i = BlockForgePieces.bounds(piece)
++	var occupied: Dictionary = {}
++	for cell_variant in piece.get("cells", []):
++		var cell: Vector2i = _to_vec2i(cell_variant)
++		occupied["%s:%s" % [cell.x, cell.y]] = true
++	var lines: Array = []
++	for y in range(bounds.y):
++		var row: String = ""
++		for x in range(bounds.x):
++			row += "X" if occupied.has("%s:%s" % [x, y]) else "."
++		lines.append(row)
++	var title: String = str(piece.get("id", "piece")).replace("_", " ").capitalize()
++	return "%s\n%s" % [title, "\n".join(lines)]
++
++func _tray_is_empty() -> bool:
++	for piece_variant in _tray:
++		if piece_variant is Dictionary and not (piece_variant as Dictionary).is_empty():
++			return false
++	return true
++
++func _score_breakdown_text(score_data: Dictionary) -> String:
++	return "Placed +%d | Lines +%d | Combo +%d" % [
++		int(score_data.get("placed", 0)),
++		int(score_data.get("line_bonus", 0)),
++		int(score_data.get("combo_bonus", 0)),
++	]
++
++func _set_status(message: String) -> void:
++	status_label.text = message
++
++func _board_button(x: int, y: int) -> Button:
++	return _board_buttons[y * BOARD_SIZE + x] as Button
++
++func _cell_style(color: Color) -> StyleBoxFlat:
++	var style := StyleBoxFlat.new()
++	style.bg_color = color
++	style.corner_radius_top_left = 8
++	style.corner_radius_top_right = 8
++	style.corner_radius_bottom_left = 8
++	style.corner_radius_bottom_right = 8
++	style.border_width_left = 1
++	style.border_width_top = 1
++	style.border_width_right = 1
++	style.border_width_bottom = 1
++	style.border_color = Color(0.93, 0.97, 1.0, 0.28)
++	return style
++
++func _to_vec2i(value: Variant) -> Vector2i:
++	if value is Vector2i:
++		return value
++	if value is Vector2:
++		var v2: Vector2 = value
++		return Vector2i(int(v2.x), int(v2.y))
++	if value is Dictionary:
++		return Vector2i(int(value.get("x", 0)), int(value.get("y", 0)))
++	return Vector2i.ZERO
++
++func _bump_cell(x: int, y: int) -> void:
++	var cell: Button = _board_button(x, y)
++	var tween: Tween = create_tween()
++	tween.tween_property(cell, "scale", Vector2(0.88, 0.88), 0.06)
++	tween.tween_property(cell, "scale", Vector2.ONE, 0.1)
++
++func _animate_placement(cells: Array) -> void:
++	if cells.is_empty():
++		return
++	var tween: Tween = create_tween()
++	for cell_variant in cells:
++		var cell: Vector2i = _to_vec2i(cell_variant)
++		var button: Button = _board_button(cell.x, cell.y)
++		button.scale = Vector2(0.82, 0.82)
++		tween.parallel().tween_property(button, "scale", Vector2.ONE, 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
++	await tween.finished
++
++func _animate_clear(cells: Array) -> void:
++	if cells.is_empty():
++		return
++	var tween: Tween = create_tween()
++	for cell_variant in cells:
++		var cell: Vector2i = _to_vec2i(cell_variant)
++		var button: Button = _board_button(cell.x, cell.y)
++		tween.parallel().tween_property(button, "modulate", BOARD_FLASH_COLOR, 0.12)
++	await tween.finished
++
++func _shake_screen(intensity_lines: int) -> void:
++	var intensity: float = min(8.0, 1.8 + float(intensity_lines) * 1.6)
++	var tween: Tween = create_tween()
++	for _step in range(6):
++		var offset := Vector2(
++			_rng.randf_range(-intensity, intensity),
++			_rng.randf_range(-intensity * 0.5, intensity * 0.5)
++		)
++		tween.tween_property(shake_root, "position", _base_shake_pos + offset, 0.02)
++	tween.tween_property(shake_root, "position", _base_shake_pos, 0.05)
++	await tween.finished
++
++func _on_pause_pressed() -> void:
++	if _input_locked:
++		return
++	pause_overlay.visible = true
++	_set_status("Paused")
++
++func _on_resume_pressed() -> void:
++	pause_overlay.visible = false
++	_set_status("Select a tray piece.")
++
++func _on_menu_pressed() -> void:
++	pause_overlay.visible = false
++	RunManager.goto_menu()
+diff --git a/src/scenes/Game.tscn b/src/scenes/Game.tscn
+new file mode 100644
+index 0000000..f1ad140
+--- /dev/null
++++ b/src/scenes/Game.tscn
+@@ -0,0 +1,181 @@
++[gd_scene load_steps=2 format=3]
++
++[ext_resource type="Script" path="res://src/scenes/BlockForgeGame.gd" id="1"]
++
++[node name="Game" type="Control"]
++layout_mode = 3
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++grow_horizontal = 2
++grow_vertical = 2
++script = ExtResource("1")
++
++[node name="Background" type="ColorRect" parent="."]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++grow_horizontal = 2
++grow_vertical = 2
++color = Color(0.06, 0.11, 0.17, 1)
++
++[node name="ShakeRoot" type="Control" parent="."]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++grow_horizontal = 2
++grow_vertical = 2
++
++[node name="UI" type="MarginContainer" parent="ShakeRoot"]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++offset_left = 26.0
++offset_top = 30.0
++offset_right = -26.0
++offset_bottom = -30.0
++grow_horizontal = 2
++grow_vertical = 2
++
++[node name="Main" type="VBoxContainer" parent="ShakeRoot/UI"]
++layout_mode = 2
++theme_override_constants/separation = 16
++
++[node name="TopBar" type="HBoxContainer" parent="ShakeRoot/UI/Main"]
++custom_minimum_size = Vector2(0, 100)
++layout_mode = 2
++theme_override_constants/separation = 14
++
++[node name="ScoreLabel" type="Label" parent="ShakeRoot/UI/Main/TopBar"]
++layout_mode = 2
++size_flags_horizontal = 3
++text = "Score: 0"
++theme_override_font_sizes/font_size = 48
++
++[node name="ComboLabel" type="Label" parent="ShakeRoot/UI/Main/TopBar"]
++layout_mode = 2
++size_flags_horizontal = 3
++text = "Combo: 0"
++horizontal_alignment = 1
++theme_override_font_sizes/font_size = 36
++
++[node name="PauseButton" type="Button" parent="ShakeRoot/UI/Main/TopBar"]
++custom_minimum_size = Vector2(138, 86)
++layout_mode = 2
++text = "Pause"
++theme_override_font_sizes/font_size = 28
++
++[node name="BoardPanel" type="Panel" parent="ShakeRoot/UI/Main"]
++custom_minimum_size = Vector2(0, 780)
++layout_mode = 2
++size_flags_vertical = 3
++self_modulate = Color(0.84, 0.93, 1, 0.84)
++
++[node name="BoardPadding" type="MarginContainer" parent="ShakeRoot/UI/Main/BoardPanel"]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++offset_left = 20.0
++offset_top = 20.0
++offset_right = -20.0
++offset_bottom = -20.0
++grow_horizontal = 2
++grow_vertical = 2
++
++[node name="BoardGrid" type="GridContainer" parent="ShakeRoot/UI/Main/BoardPanel/BoardPadding"]
++layout_mode = 2
++size_flags_horizontal = 4
++size_flags_vertical = 4
++columns = 8
++theme_override_constants/h_separation = 6
++theme_override_constants/v_separation = 6
++
++[node name="TrayLabel" type="Label" parent="ShakeRoot/UI/Main"]
++layout_mode = 2
++text = "TRAY"
++horizontal_alignment = 1
++theme_override_font_sizes/font_size = 26
++
++[node name="TrayContainer" type="HBoxContainer" parent="ShakeRoot/UI/Main"]
++custom_minimum_size = Vector2(0, 184)
++layout_mode = 2
++theme_override_constants/separation = 10
++
++[node name="StatusLabel" type="Label" parent="ShakeRoot/UI/Main"]
++custom_minimum_size = Vector2(0, 56)
++layout_mode = 2
++horizontal_alignment = 1
++vertical_alignment = 1
++text = "Select a tray piece."
++theme_override_font_sizes/font_size = 24
++
++[node name="PauseOverlay" type="Control" parent="."]
++visible = false
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++grow_horizontal = 2
++grow_vertical = 2
++
++[node name="Dimmer" type="ColorRect" parent="PauseOverlay"]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++grow_horizontal = 2
++grow_vertical = 2
++color = Color(0.03, 0.04, 0.06, 0.74)
++
++[node name="Center" type="CenterContainer" parent="PauseOverlay"]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++grow_horizontal = 2
++grow_vertical = 2
++
++[node name="Panel" type="Panel" parent="PauseOverlay/Center"]
++custom_minimum_size = Vector2(420, 360)
++layout_mode = 2
++self_modulate = Color(0.87, 0.95, 1, 0.93)
++
++[node name="VBox" type="VBoxContainer" parent="PauseOverlay/Center/Panel"]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++offset_left = 30.0
++offset_top = 30.0
++offset_right = -30.0
++offset_bottom = -30.0
++grow_horizontal = 2
++grow_vertical = 2
++alignment = 1
++theme_override_constants/separation = 16
++
++[node name="Title" type="Label" parent="PauseOverlay/Center/Panel/VBox"]
++layout_mode = 2
++text = "Paused"
++horizontal_alignment = 1
++theme_override_font_sizes/font_size = 46
++
++[node name="ResumeButton" type="Button" parent="PauseOverlay/Center/Panel/VBox"]
++custom_minimum_size = Vector2(0, 92)
++layout_mode = 2
++text = "Resume"
++theme_override_font_sizes/font_size = 30
++
++[node name="MenuButton" type="Button" parent="PauseOverlay/Center/Panel/VBox"]
++custom_minimum_size = Vector2(0, 92)
++layout_mode = 2
++text = "Main Menu"
++theme_override_font_sizes/font_size = 28
++
++[connection signal="pressed" from="ShakeRoot/UI/Main/TopBar/PauseButton" to="." method="_on_pause_pressed"]
++[connection signal="pressed" from="PauseOverlay/Center/Panel/VBox/ResumeButton" to="." method="_on_resume_pressed"]
++[connection signal="pressed" from="PauseOverlay/Center/Panel/VBox/MenuButton" to="." method="_on_menu_pressed"]
+diff --git a/src/scenes/Results.gd b/src/scenes/Results.gd
+new file mode 100644
+index 0000000..76305d9
+--- /dev/null
++++ b/src/scenes/Results.gd
+@@ -0,0 +1,58 @@
++extends Control
++
++@onready var score_label: Label = $Center/Panel/VBox/ScoreLabel
++@onready var best_label: Label = $Center/Panel/VBox/BestLabel
++@onready var continue_button: Button = $Center/Panel/VBox/ContinueButton
++
++var _waiting_for_reward: bool = false
++
++func _ready() -> void:
++	_update_labels()
++	if not AdManager.is_connected("rewarded_earned", Callable(self, "_on_rewarded_earned")):
++		AdManager.connect("rewarded_earned", Callable(self, "_on_rewarded_earned"))
++	if not AdManager.is_connected("rewarded_closed", Callable(self, "_on_rewarded_closed")):
++		AdManager.connect("rewarded_closed", Callable(self, "_on_rewarded_closed"))
++
++func _exit_tree() -> void:
++	if AdManager.is_connected("rewarded_earned", Callable(self, "_on_rewarded_earned")):
++		AdManager.disconnect("rewarded_earned", Callable(self, "_on_rewarded_earned"))
++	if AdManager.is_connected("rewarded_closed", Callable(self, "_on_rewarded_closed")):
++		AdManager.disconnect("rewarded_closed", Callable(self, "_on_rewarded_closed"))
++
++func _update_labels() -> void:
++	score_label.text = "Score: %d" % RunManager.last_score
++	best_label.text = "Best: %d" % SaveStore.get_high_score()
++	continue_button.visible = RunManager.can_continue_current_run()
++	continue_button.disabled = false
++	continue_button.text = "Continue (Rewarded)"
++	_waiting_for_reward = false
++
++func _on_restart_pressed() -> void:
++	RunManager.start_block_forge()
++
++func _on_menu_pressed() -> void:
++	RunManager.goto_menu()
++
++func _on_continue_pressed() -> void:
++	if _waiting_for_reward or not RunManager.can_continue_current_run():
++		return
++	_waiting_for_reward = true
++	continue_button.disabled = true
++	var shown: bool = AdManager.show_rewarded_continue()
++	if not shown:
++		_waiting_for_reward = false
++		continue_button.disabled = false
++		continue_button.text = "Ad unavailable"
++
++func _on_rewarded_earned() -> void:
++	if not _waiting_for_reward:
++		return
++	_waiting_for_reward = false
++	var resumed: bool = RunManager.continue_block_forge_after_reward()
++	if not resumed:
++		_update_labels()
++
++func _on_rewarded_closed() -> void:
++	if _waiting_for_reward:
++		_waiting_for_reward = false
++		continue_button.disabled = false
+diff --git a/src/scenes/Results.tscn b/src/scenes/Results.tscn
+new file mode 100644
+index 0000000..0d00f87
+--- /dev/null
++++ b/src/scenes/Results.tscn
+@@ -0,0 +1,88 @@
++[gd_scene load_steps=2 format=3]
++
++[ext_resource type="Script" path="res://src/scenes/Results.gd" id="1"]
++
++[node name="Results" type="Control"]
++layout_mode = 3
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++grow_horizontal = 2
++grow_vertical = 2
++script = ExtResource("1")
++
++[node name="Background" type="ColorRect" parent="."]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++grow_horizontal = 2
++grow_vertical = 2
++color = Color(0.06, 0.11, 0.16, 1)
++
++[node name="Center" type="CenterContainer" parent="."]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++grow_horizontal = 2
++grow_vertical = 2
++
++[node name="Panel" type="Panel" parent="Center"]
++custom_minimum_size = Vector2(620, 880)
++layout_mode = 2
++self_modulate = Color(0.86, 0.94, 1, 0.88)
++
++[node name="VBox" type="VBoxContainer" parent="Center/Panel"]
++layout_mode = 1
++anchors_preset = 15
++anchor_right = 1.0
++anchor_bottom = 1.0
++offset_left = 42.0
++offset_top = 42.0
++offset_right = -42.0
++offset_bottom = -42.0
++grow_horizontal = 2
++grow_vertical = 2
++alignment = 1
++theme_override_constants/separation = 18
++
++[node name="Title" type="Label" parent="Center/Panel/VBox"]
++layout_mode = 2
++text = "Run Complete"
++horizontal_alignment = 1
++theme_override_font_sizes/font_size = 58
++
++[node name="ScoreLabel" type="Label" parent="Center/Panel/VBox"]
++layout_mode = 2
++text = "Score: 0"
++horizontal_alignment = 1
++theme_override_font_sizes/font_size = 54
++
++[node name="BestLabel" type="Label" parent="Center/Panel/VBox"]
++layout_mode = 2
++text = "Best: 0"
++horizontal_alignment = 1
++theme_override_font_sizes/font_size = 34
++
++[node name="ContinueButton" type="Button" parent="Center/Panel/VBox"]
++custom_minimum_size = Vector2(0, 108)
++layout_mode = 2
++text = "Continue (Rewarded)"
++theme_override_font_sizes/font_size = 30
++
++[node name="RestartButton" type="Button" parent="Center/Panel/VBox"]
++custom_minimum_size = Vector2(0, 112)
++layout_mode = 2
++text = "Restart"
++theme_override_font_sizes/font_size = 36
++
++[node name="MenuButton" type="Button" parent="Center/Panel/VBox"]
++custom_minimum_size = Vector2(0, 100)
++layout_mode = 2
++text = "Menu"
++theme_override_font_sizes/font_size = 32
++
++[connection signal="pressed" from="Center/Panel/VBox/ContinueButton" to="." method="_on_continue_pressed"]
++[connection signal="pressed" from="Center/Panel/VBox/RestartButton" to="." method="_on_restart_pressed"]
++[connection signal="pressed" from="Center/Panel/VBox/MenuButton" to="." method="_on_menu_pressed"]
+diff --git a/tests/test_block_forge_rules.gd b/tests/test_block_forge_rules.gd
+new file mode 100644
+index 0000000..ac44d51
+--- /dev/null
++++ b/tests/test_block_forge_rules.gd
+@@ -0,0 +1,60 @@
++extends GdUnitTestSuite
++
++const BlockForgeRules := preload("res://src/games/block_forge/BlockForgeRules.gd")
++const BlockForgePieces := preload("res://src/games/block_forge/BlockForgePieces.gd")
++
++func test_placement_validity() -> void:
++	var board: Array = BlockForgeRules.create_board(8, 8)
++	var square: Dictionary = BlockForgePieces.piece_by_id("square_2")
++	assert_that(BlockForgeRules.can_place(board, square, Vector2i(0, 0))).is_true()
++	board = BlockForgeRules.place(board, square, Vector2i(0, 0))
++	assert_that(BlockForgeRules.can_place(board, square, Vector2i(0, 0))).is_false()
++	assert_that(BlockForgeRules.can_place(board, square, Vector2i(7, 7))).is_false()
++
++func test_line_clearing() -> void:
++	var board: Array = BlockForgeRules.create_board(8, 8)
++	for x in range(8):
++		board[0][x] = 1
++	for y in range(8):
++		board[y][3] = 1
++	var result: Dictionary = BlockForgeRules.clear_lines(board)
++	var cleared_board: Array = result.get("board", [])
++	assert_that(int(result.get("count", 0))).is_equal(2)
++	for x in range(8):
++		assert_that(int(cleared_board[0][x])).is_equal(0)
++	for y in range(8):
++		assert_that(int(cleared_board[y][3])).is_equal(0)
++
++func test_combo_scoring() -> void:
++	var first_clear: Dictionary = BlockForgeRules.score_for_move(4, 1, 1)
++	var second_clear: Dictionary = BlockForgeRules.score_for_move(4, 1, 2)
++	assert_that(int(first_clear.get("total", 0))).is_equal(79)
++	assert_that(int(second_clear.get("total", 0))).is_equal(104)
++
++func test_game_over_detection() -> void:
++	var board: Array = BlockForgeRules.create_board(8, 8)
++	for y in range(8):
++		for x in range(8):
++			board[y][x] = 1
++	board[7][7] = 0
++	var blocked_tray: Array = [
++		BlockForgePieces.piece_by_id("square_2"),
++		BlockForgePieces.piece_by_id("line_3_h"),
++	]
++	assert_that(BlockForgeRules.any_move_possible(board, blocked_tray)).is_false()
++	var single_tray: Array = [BlockForgePieces.piece_by_id("single")]
++	assert_that(BlockForgeRules.any_move_possible(board, single_tray)).is_true()
++
++func test_revive_clears_up_to_n_cells() -> void:
++	var board: Array = BlockForgeRules.create_board(8, 8)
++	for x in range(6):
++		board[0][x] = 1
++	var revived: Dictionary = BlockForgeRules.apply_revive(board, 10)
++	assert_that(int(revived.get("cleared", 0))).is_equal(6)
++	var revived_board: Array = revived.get("board", [])
++	var filled_left: int = 0
++	for y in range(8):
++		for x in range(8):
++			if int(revived_board[y][x]) != 0:
++				filled_left += 1
++	assert_that(filled_left).is_equal(0)
