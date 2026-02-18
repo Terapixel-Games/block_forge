@@ -17,11 +17,12 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-SaveStore="*res://src/data/SaveStore.gd"
+SaveManager="*res://addons/arcade_core/SaveManager.gd"
+StreakManager="*res://addons/arcade_core/StreakManager.gd"
+AudioManager="*res://addons/arcade_core/AudioManager.gd"
+Fx="*res://addons/arcade_core/Fx.gd"
+AdManager="*res://addons/arcade_core/AdManager.gd"
 RunManager="*res://src/core/RunManager.gd"
-AdManager="*res://src/ads/AdManager.gd"
-MusicManager="*res://src/core/MusicManager.gd"
-VFXManager="*res://src/core/VFXManager.gd"
 
 [display]
 

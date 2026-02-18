@@ -1,0 +1,4 @@
+# Copy to AdMob.local.txt and set real IDs for production.
+APP_ID=ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy
+INTERSTITIAL=ca-app-pub-xxxxxxxxxxxxxxxx/zzzzzzzzzz
+REWARDED=ca-app-pub-xxxxxxxxxxxxxxxx/wwwwwwwwww

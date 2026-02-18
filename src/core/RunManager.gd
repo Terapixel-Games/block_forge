@@ -20,7 +20,9 @@ func start_block_forge() -> void:
 
 func end_block_forge(score: int) -> void:
 	last_score = score
-	SaveStore.set_high_score(score)
+	var best_score: int = int(SaveManager.get_best("block_forge_high_score", 0))
+	if score > best_score:
+		SaveManager.set_best("block_forge_high_score", score)
 	AdManager.on_game_finished()
 	goto_results()
 
