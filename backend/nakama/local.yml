@@ -1,0 +1,32 @@
+name: "block_forge-nakama"
+logger:
+  level: "INFO"
+
+session:
+  token_expiry_sec: 7200
+  refresh_token_expiry_sec: 604800
+
+socket:
+  server_key: "block-forge-dev-key"
+  port: 7350
+
+console:
+  port: 7351
+  username: "admin"
+  password: "adminpassword"
+
+runtime:
+  path: "/nakama/data/modules"
+  js_entrypoint: "index.js"
+  env:
+    - "GAME_ID=block_forge"
+    - "LEADERBOARD_ID=block_forge_high_scores"
+    - "PLATFORM_IDENTITY_URL=http://host.docker.internal:8080"
+    - "PLATFORM_ACCOUNT_MAGIC_LINK_START_URL=http://host.docker.internal:8080/v1/account/magic-link/start"
+    - "PLATFORM_ACCOUNT_MAGIC_LINK_COMPLETE_URL=http://host.docker.internal:8080/v1/account/magic-link/complete"
+    - "PLATFORM_USERNAME_VALIDATE_URL=http://host.docker.internal:8080/v1/identity/internal/username/validate"
+    - "PLATFORM_ACCOUNT_MERGE_CODE_URL=http://host.docker.internal:8080/v1/account/merge/code"
+    - "PLATFORM_ACCOUNT_MERGE_REDEEM_URL=http://host.docker.internal:8080/v1/account/merge/redeem"
+    - "PLATFORM_TELEMETRY_EVENTS_URL=http://host.docker.internal:8080/v1/telemetry/events"
+    - "PLATFORM_INTERNAL_KEY="
+    - "TPX_MAGIC_LINK_NOTIFY_SECRET="

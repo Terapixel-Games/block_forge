@@ -5,6 +5,7 @@ const TRAY_SIZE: int = 3
 
 const BlockForgeRules := preload("res://src/games/block_forge/BlockForgeRules.gd")
 const BlockForgePieces := preload("res://src/games/block_forge/BlockForgePieces.gd")
+const BlockForgeDifficulty := preload("res://src/games/block_forge/BlockForgeDifficulty.gd")
 
 const BOARD_EMPTY_COLOR: Color = Color(0.19, 0.25, 0.33, 1.0)
 const BOARD_FILLED_COLOR: Color = Color(0.62, 0.9, 0.92, 1.0)
@@ -20,6 +21,7 @@ const TRAY_USED_COLOR: Color = Color(0.68, 0.68, 0.7, 0.75)
 @onready var tray_container: HBoxContainer = $ShakeRoot/UI/Main/TrayContainer
 @onready var score_label: Label = $ShakeRoot/UI/Main/TopBar/ScoreLabel
 @onready var combo_label: Label = $ShakeRoot/UI/Main/TopBar/ComboLabel
+@onready var objective_label: Label = $ShakeRoot/UI/Main/ObjectiveLabel
 @onready var status_label: Label = $ShakeRoot/UI/Main/StatusLabel
 @onready var pause_overlay: Control = $PauseOverlay
 
@@ -28,6 +30,7 @@ var _tray: Array = []
 var _score: int = 0
 var _combo: int = 0
 var _revive_used: bool = false
+var _powerups: Dictionary = {}
 var _selected_piece_index: int = -1
 var _preview_piece_index: int = -1
 var _preview_origin: Vector2i = Vector2i(-999, -999)
@@ -38,6 +41,8 @@ var _tray_buttons: Array = []
 var _input_locked: bool = false
 var _base_shake_pos: Vector2 = Vector2.ZERO
 var _rng := RandomNumberGenerator.new()
+var _turns_without_clear: int = 0
+var _active_rival_target: int = 0
 
 func _ready() -> void:
 	_rng.randomize()
@@ -91,12 +96,18 @@ func _load_run_state() -> void:
 		_score = 0
 		_combo = 0
 		_revive_used = false
+		_powerups = _shop_powerups_snapshot()
+		_turns_without_clear = 0
+		_active_rival_target = int(RunManager.get_active_rival_target())
 		return
 	_board = _sanitize_board(pending_state.get("board", []))
 	_tray = _sanitize_tray(pending_state.get("tray", []))
 	_score = int(pending_state.get("score", 0))
 	_combo = int(pending_state.get("combo", 0))
 	_revive_used = bool(pending_state.get("revive_used", false))
+	_powerups = _sanitize_powerups(pending_state.get("powerups", _shop_powerups_snapshot()))
+	_turns_without_clear = max(0, int(pending_state.get("turns_without_clear", 0)))
+	_active_rival_target = int(pending_state.get("rival_target", RunManager.get_active_rival_target()))
 	if _tray_is_empty():
 		_tray = _roll_playable_tray()
 
@@ -131,10 +142,18 @@ func _sanitize_tray(value: Variant) -> Array:
 
 func _roll_playable_tray() -> Array:
 	var fallback: Array = [{}, {}, {}]
+	var pressure: int = BlockForgeDifficulty.pressure_level(_board, _turns_without_clear)
+	var max_cells: int = BlockForgeDifficulty.max_piece_cells_for_pressure(pressure)
+	var force_lifeline: bool = BlockForgeDifficulty.should_force_lifeline(pressure, _turns_without_clear)
 	for _attempt in range(32):
 		var candidate: Array = []
+		var has_lifeline: bool = false
 		for _slot in range(TRAY_SIZE):
-			candidate.append(BlockForgePieces.random_piece(_rng))
+			var piece: Dictionary = _draw_piece_with_guardrails(max_cells, force_lifeline and _slot == 0)
+			has_lifeline = has_lifeline or _piece_cell_count(piece) <= 2
+			candidate.append(piece)
+		if force_lifeline and not has_lifeline:
+			candidate[0] = BlockForgePieces.piece_by_id("single")
 		fallback = candidate
 		if BlockForgeRules.any_move_possible(_board, candidate):
 			return candidate
@@ -196,6 +215,7 @@ func _commit_move(piece: Dictionary, origin: Vector2i) -> void:
 	var clear_result: Dictionary = BlockForgeRules.clear_lines(_board)
 	var cleared_lines: int = int(clear_result.get("count", 0))
 	if cleared_lines > 0:
+		_turns_without_clear = 0
 		_combo += 1
 		var clear_cells: Array = _cells_from_clear_result(clear_result)
 		await _animate_clear(clear_cells)
@@ -204,6 +224,7 @@ func _commit_move(piece: Dictionary, origin: Vector2i) -> void:
 			await _shake_screen(cleared_lines)
 	else:
 		_combo = 0
+		_turns_without_clear += 1
 
 	var score_data: Dictionary = BlockForgeRules.score_for_move(placed_cells.size(), cleared_lines, _combo)
 	_score += int(score_data.get("total", 0))
@@ -214,6 +235,7 @@ func _commit_move(piece: Dictionary, origin: Vector2i) -> void:
 	_set_status(_score_breakdown_text(score_data))
 
 	if not BlockForgeRules.any_move_possible(_board, _tray):
+		_set_status("No legal placement left. Run complete.")
 		await get_tree().create_timer(0.18).timeout
 		_finish_run()
 		return
@@ -226,9 +248,28 @@ func _finish_run() -> void:
 		"score": _score,
 		"combo": _combo,
 		"revive_used": _revive_used,
+		"powerups": _powerups.duplicate(true),
+		"turns_without_clear": _turns_without_clear,
+		"rival_target": _active_rival_target,
 	}
 	RunManager.cache_block_forge_state(snapshot)
 	RunManager.end_block_forge(_score)
+
+func _shop_powerups_snapshot() -> Dictionary:
+	if SaveManager.has_method("get_shop_powerups"):
+		return SaveManager.get_shop_powerups()
+	return {"revive": 0}
+
+func _sanitize_powerups(value: Variant) -> Dictionary:
+	var out: Dictionary = {}
+	if not (value is Dictionary):
+		return out
+	for key_variant in (value as Dictionary).keys():
+		var key: String = str(key_variant).strip_edges().to_lower()
+		if key.is_empty():
+			continue
+		out[key] = max(0, int((value as Dictionary)[key_variant]))
+	return out
 
 func _piece_cells(piece: Dictionary, origin: Vector2i) -> Array:
 	var out: Array = []
@@ -256,6 +297,7 @@ func _render_all() -> void:
 	_render_tray()
 	score_label.text = "Score: %d" % _score
 	combo_label.text = "Combo: %d" % _combo
+	_refresh_objective_text()
 
 func _render_board() -> void:
 	var preview_lookup: Dictionary = {}
@@ -312,8 +354,35 @@ func _score_breakdown_text(score_data: Dictionary) -> String:
 		int(score_data.get("combo_bonus", 0)),
 	]
 
+func _refresh_objective_text() -> void:
+	var pressure: int = BlockForgeDifficulty.pressure_level(_board, _turns_without_clear)
+	var pressure_name: String = str(["Stable", "Rising", "High", "Critical"][clampi(pressure, 0, 3)])
+	var target_text: String = "Rival target: %d" % _active_rival_target if _active_rival_target > 0 else "Rival target: build one in results"
+	if _active_rival_target > 0 and _score >= _active_rival_target:
+		target_text = "Rival target beaten. Push for season best."
+	objective_label.text = "Objective: place all tray pieces, clear lines, and keep runs alive.\nFail: run ends when no tray piece fits. %s | Pressure: %s" % [target_text, pressure_name]
+
 func _set_status(message: String) -> void:
 	status_label.text = message
+
+func _draw_piece_with_guardrails(max_cells: int, force_lifeline: bool) -> Dictionary:
+	var target_limit: int = max(1, max_cells)
+	for _attempt in range(28):
+		var piece: Dictionary = BlockForgePieces.random_piece(_rng)
+		var cells: int = _piece_cell_count(piece)
+		if cells <= target_limit:
+			if force_lifeline and cells > 2:
+				continue
+			return piece
+	if force_lifeline:
+		return BlockForgePieces.piece_by_id("single")
+	return BlockForgePieces.random_piece(_rng)
+
+func _piece_cell_count(piece: Dictionary) -> int:
+	var cells_variant: Variant = piece.get("cells", [])
+	if cells_variant is Array:
+		return (cells_variant as Array).size()
+	return 0
 
 func _update_preview(piece_index: int, piece: Dictionary, origin: Vector2i, is_valid: bool) -> void:
 	_preview_piece_index = piece_index

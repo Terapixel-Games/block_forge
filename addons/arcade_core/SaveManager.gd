@@ -22,6 +22,15 @@ const DEFAULT_DATA := {
     "ui": {
         "dismissed_tips": {},
     },
+    "shop": {
+        "powerups": {
+            "revive": 0,
+            "undo": 0,
+            "hint": 0,
+            "shuffle": 0,
+            "prism": 0,
+        },
+    },
 }
 
 var data: Dictionary = {}
@@ -175,3 +184,71 @@ func set_tip_dismissed(tip_id: String, dismissed: bool = true) -> void:
     ui["dismissed_tips"] = dismissed_tips
     data["ui"] = ui
     flush()
+
+func get_shop_powerups() -> Dictionary:
+    var defaults: Dictionary = _default_shop_powerups()
+    var shop_value: Variant = data.get("shop", {})
+    var shop: Dictionary = {}
+    if typeof(shop_value) == TYPE_DICTIONARY:
+        shop = (shop_value as Dictionary).duplicate(true)
+    var raw_value: Variant = shop.get("powerups", {})
+    var raw: Dictionary = {}
+    if typeof(raw_value) == TYPE_DICTIONARY:
+        raw = raw_value as Dictionary
+
+    var out: Dictionary = defaults.duplicate(true)
+    for key in raw.keys():
+        out[str(key).strip_edges().to_lower()] = max(0, int(raw[key]))
+    return out
+
+func set_shop_powerups(powerups: Dictionary) -> void:
+    var normalized: Dictionary = _default_shop_powerups()
+    for key in powerups.keys():
+        var clean_key := str(key).strip_edges().to_lower()
+        if clean_key.is_empty():
+            continue
+        normalized[clean_key] = max(0, int(powerups[key]))
+
+    var shop_value: Variant = data.get("shop", {})
+    var shop: Dictionary = {}
+    if typeof(shop_value) == TYPE_DICTIONARY:
+        shop = (shop_value as Dictionary).duplicate(true)
+    shop["powerups"] = normalized
+    data["shop"] = shop
+    flush()
+
+func get_shop_powerup_count(powerup_id: String, default_value: int = 0) -> int:
+    var key := powerup_id.strip_edges().to_lower()
+    if key.is_empty():
+        return max(0, default_value)
+    var powerups: Dictionary = get_shop_powerups()
+    if powerups.has(key):
+        return int(powerups[key])
+    return max(0, default_value)
+
+func set_shop_powerup_count(powerup_id: String, count: int) -> void:
+    var key := powerup_id.strip_edges().to_lower()
+    if key.is_empty():
+        return
+    var powerups: Dictionary = get_shop_powerups()
+    powerups[key] = max(0, count)
+    set_shop_powerups(powerups)
+
+func consume_shop_powerup(powerup_id: String, amount: int = 1) -> int:
+    var key := powerup_id.strip_edges().to_lower()
+    if key.is_empty():
+        return 0
+    var consume_amount: int = max(1, amount)
+    var current: int = get_shop_powerup_count(key, 0)
+    var remaining: int = max(0, current - consume_amount)
+    set_shop_powerup_count(key, remaining)
+    return remaining
+
+func _default_shop_powerups() -> Dictionary:
+    var shop_default: Variant = DEFAULT_DATA.get("shop", {})
+    if typeof(shop_default) != TYPE_DICTIONARY:
+        return {}
+    var powerups_default: Variant = (shop_default as Dictionary).get("powerups", {})
+    if typeof(powerups_default) != TYPE_DICTIONARY:
+        return {}
+    return (powerups_default as Dictionary).duplicate(true)

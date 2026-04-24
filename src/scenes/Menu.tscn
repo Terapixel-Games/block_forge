@@ -1,6 +1,60 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://src/scenes/Menu.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="1_panel"]
+bg_color = Color(0.08, 0.1, 0.16, 0.9)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.52, 0.9, 1, 0.34)
+corner_radius_top_left = 38
+corner_radius_top_right = 38
+corner_radius_bottom_right = 38
+corner_radius_bottom_left = 38
+shadow_color = Color(0, 0, 0, 0.24)
+shadow_size = 20
+content_margin_left = 32.0
+content_margin_top = 32.0
+content_margin_right = 32.0
+content_margin_bottom = 32.0
+
+[sub_resource type="StyleBoxFlat" id="2_primary"]
+bg_color = Color(0.12, 0.71, 0.78, 0.96)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.82, 0.98, 1, 0.72)
+corner_radius_top_left = 28
+corner_radius_top_right = 28
+corner_radius_bottom_right = 28
+corner_radius_bottom_left = 28
+
+[sub_resource type="StyleBoxFlat" id="3_primary_hover"]
+bg_color = Color(0.18, 0.8, 0.88, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.9, 1, 1, 0.84)
+corner_radius_top_left = 28
+corner_radius_top_right = 28
+corner_radius_bottom_right = 28
+corner_radius_bottom_left = 28
+
+[sub_resource type="StyleBoxFlat" id="4_secondary"]
+bg_color = Color(0.14, 0.19, 0.29, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.55, 0.76, 1, 0.42)
+corner_radius_top_left = 28
+corner_radius_top_right = 28
+corner_radius_bottom_right = 28
+corner_radius_bottom_left = 28
 
 [node name="Menu" type="Control"]
 layout_mode = 3
@@ -18,7 +72,16 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.07, 0.11, 0.16, 1)
+color = Color(0.04, 0.06, 0.1, 1)
+
+[node name="AccentGlow" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.12, 0.36, 0.46, 0.18)
 
 [node name="Center" type="CenterContainer" parent="."]
 layout_mode = 1
@@ -29,47 +92,102 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="Panel" type="Panel" parent="Center"]
-custom_minimum_size = Vector2(620, 820)
+custom_minimum_size = Vector2(700, 900)
 layout_mode = 2
-self_modulate = Color(0.84, 0.93, 1, 0.78)
+theme_override_styles/panel = SubResource("1_panel")
 
 [node name="VBox" type="VBoxContainer" parent="Center/Panel"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 44.0
-offset_top = 44.0
-offset_right = -44.0
-offset_bottom = -44.0
+offset_left = 40.0
+offset_top = 40.0
+offset_right = -40.0
+offset_bottom = -40.0
 grow_horizontal = 2
 grow_vertical = 2
 alignment = 1
-theme_override_constants/separation = 26
+theme_override_constants/separation = 22
+
+[node name="Kicker" type="Label" parent="Center/Panel/VBox"]
+layout_mode = 2
+text = "TACTICAL STACKER"
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.58, 0.9, 0.96, 0.92)
+theme_override_font_sizes/font_size = 22
 
 [node name="Title" type="Label" parent="Center/Panel/VBox"]
 layout_mode = 2
 text = "Block Forge"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 88
+theme_override_colors/font_color = Color(0.95, 0.99, 1, 1)
+theme_override_font_sizes/font_size = 92
 
 [node name="Subtitle" type="Label" parent="Center/Panel/VBox"]
 layout_mode = 2
-text = "Fill smart. Clear big."
+text = "Fill smart. Clear big. Keep the tray moving."
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 30
+theme_override_colors/font_color = Color(0.78, 0.88, 0.98, 0.86)
+theme_override_font_sizes/font_size = 28
+
+[node name="SignalRow" type="HBoxContainer" parent="Center/Panel/VBox"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 12
+
+[node name="Planning" type="Label" parent="Center/Panel/VBox/SignalRow"]
+layout_mode = 2
+text = "SMART TRAY"
+theme_override_colors/font_color = Color(0.95, 0.97, 1, 0.82)
+theme_override_font_sizes/font_size = 18
+
+[node name="Pressure" type="Label" parent="Center/Panel/VBox/SignalRow"]
+layout_mode = 2
+text = "ROW BURSTS"
+theme_override_colors/font_color = Color(0.95, 0.97, 1, 0.82)
+theme_override_font_sizes/font_size = 18
+
+[node name="Clarity" type="Label" parent="Center/Panel/VBox/SignalRow"]
+layout_mode = 2
+text = "ZERO NOISE"
+theme_override_colors/font_color = Color(0.95, 0.97, 1, 0.82)
+theme_override_font_sizes/font_size = 18
+
+[node name="ObjectiveLabel" type="Label" parent="Center/Panel/VBox"]
+layout_mode = 2
+autowrap_mode = 3
+text = "Objective: place every tray piece and cash out full rows or columns before the board locks."
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.82, 0.9, 0.98, 0.92)
+theme_override_font_sizes/font_size = 22
+
+[node name="LaunchNote" type="Label" parent="Center/Panel/VBox"]
+layout_mode = 2
+text = "Season rival targets appear here when they are live."
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.56, 0.82, 0.9, 0.84)
+theme_override_font_sizes/font_size = 18
 
 [node name="StartButton" type="Button" parent="Center/Panel/VBox"]
 custom_minimum_size = Vector2(0, 124)
 layout_mode = 2
-theme_override_font_sizes/font_size = 42
-text = "Start"
+theme_override_colors/font_color = Color(0.04, 0.12, 0.16, 1)
+theme_override_font_sizes/font_size = 40
+theme_override_styles/normal = SubResource("2_primary")
+theme_override_styles/hover = SubResource("3_primary_hover")
+theme_override_styles/pressed = SubResource("3_primary_hover")
+text = "Start Forge"
 
 [node name="QuitButton" type="Button" parent="Center/Panel/VBox"]
-custom_minimum_size = Vector2(0, 116)
+custom_minimum_size = Vector2(0, 104)
 layout_mode = 2
-theme_override_font_sizes/font_size = 34
-text = "Quit"
+theme_override_colors/font_color = Color(0.92, 0.97, 1, 1)
+theme_override_font_sizes/font_size = 30
+theme_override_styles/normal = SubResource("4_secondary")
+theme_override_styles/hover = SubResource("2_primary")
+theme_override_styles/pressed = SubResource("2_primary")
+text = "Exit"
 
 [connection signal="pressed" from="Center/Panel/VBox/StartButton" to="." method="_on_start_pressed"]
 [connection signal="pressed" from="Center/Panel/VBox/QuitButton" to="." method="_on_quit_pressed"]

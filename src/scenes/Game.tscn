@@ -68,6 +68,13 @@ layout_mode = 2
 text = "Pause"
 theme_override_font_sizes/font_size = 28
 
+[node name="ObjectiveLabel" type="Label" parent="ShakeRoot/UI/Main"]
+custom_minimum_size = Vector2(0, 88)
+layout_mode = 2
+autowrap_mode = 3
+text = "Objective: place tray pieces and clear lines. Fail when no piece fits."
+theme_override_font_sizes/font_size = 22
+
 [node name="BoardPanel" type="Panel" parent="ShakeRoot/UI/Main"]
 custom_minimum_size = Vector2(0, 780)
 layout_mode = 2

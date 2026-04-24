@@ -1,0 +1,58 @@
+services:
+  terapixel-platform:
+    build:
+      context: ../..
+      dockerfile: backend/ci/terapixel-platform/Dockerfile
+    environment:
+      PORT: "8080"
+      DB_PATH: "/data/terapixel-platform.db"
+      TPX_GAME_ID: "block_forge"
+      INTERNAL_SERVICE_KEY: "ci-internal-key"
+    ports:
+      - "18080:8080"
+    volumes:
+      - tpx_platform_data:/data
+
+  cockroachdb:
+    image: cockroachdb/cockroach:v23.2.5
+    command: start-single-node --insecure --store=attrs=ssd,path=/var/lib/cockroach/
+    ports:
+      - "126257:26257"
+    volumes:
+      - cockroach_data:/var/lib/cockroach
+
+  nakama:
+    image: heroiclabs/nakama:3.20.0
+    depends_on:
+      - cockroachdb
+      - terapixel-platform
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        /nakama/nakama migrate up --database.address root@cockroachdb:26257 &&
+        exec /nakama/nakama --name nakama1 --database.address root@cockroachdb:26257 --config /nakama/data/local.ci.yml --logger.level INFO
+    ports:
+      - "17350:7350"
+      - "17351:7351"
+    volumes:
+      - ../nakama/local.ci.yml:/nakama/data/local.ci.yml:ro
+      - ../nakama/modules:/nakama/data/modules:ro
+
+  godot-smoke:
+    build:
+      context: ../..
+      dockerfile: backend/ci/godot/Dockerfile
+    depends_on:
+      - terapixel-platform
+      - nakama
+    working_dir: /workspace
+    volumes:
+      - ../..:/workspace
+    entrypoint:
+      - /bin/bash
+      - /workspace/backend/ci/godot/run-smoke.sh
+
+volumes:
+  tpx_platform_data:
+  cockroach_data:

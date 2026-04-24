@@ -1,0 +1,63 @@
+databases:
+  - name: block_forge-nakama-db
+    databaseName: block_forge
+    user: block_forge
+    plan: free
+
+services:
+  - type: web
+    name: block_forge-nakama
+    runtime: docker
+    plan: starter
+    dockerContext: ./backend/nakama
+    dockerfilePath: ./backend/nakama/Dockerfile.render
+    healthCheckPath: /healthcheck
+    envVars:
+      - key: GAME_ID
+        value: "block_forge"
+      - key: LEADERBOARD_ID
+        value: "block_forge_high_scores"
+      - key: PLATFORM_IDENTITY_URL
+        sync: false
+      - key: PLATFORM_ACCOUNT_MAGIC_LINK_START_URL
+        sync: false
+      - key: PLATFORM_ACCOUNT_MAGIC_LINK_COMPLETE_URL
+        sync: false
+      - key: PLATFORM_USERNAME_VALIDATE_URL
+        sync: false
+      - key: PLATFORM_ACCOUNT_MERGE_CODE_URL
+        sync: false
+      - key: PLATFORM_ACCOUNT_MERGE_REDEEM_URL
+        sync: false
+      - key: PLATFORM_TELEMETRY_EVENTS_URL
+        sync: false
+      - key: PLATFORM_INTERNAL_KEY
+        sync: false
+      - key: TPX_MAGIC_LINK_NOTIFY_SECRET
+        sync: false
+      - key: USERNAME_CHANGE_COST_COINS
+        value: "300"
+      - key: USERNAME_CHANGE_COOLDOWN_SECONDS
+        value: "300"
+      - key: USERNAME_CHANGE_MAX_PER_DAY
+        value: "3"
+      - key: DB_HOST
+        fromDatabase:
+          name: block_forge-nakama-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: block_forge-nakama-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: block_forge-nakama-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: block_forge-nakama-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: block_forge-nakama-db
+          property: password

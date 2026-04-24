@@ -140,6 +140,9 @@ func show_rewarded_for_powerup() -> bool:
         return true
     return _start_rewarded_retry()
 
+func show_rewarded_continue() -> bool:
+    return show_rewarded_for_powerup()
+
 func _on_interstitial_loaded() -> void:
     if _interstitial_retry_active:
         _show_interstitial_now(_interstitial_retry_game_count)

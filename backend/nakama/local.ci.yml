@@ -1,0 +1,12 @@
+name: "block-forge-ci"
+data_dir: "/nakama/data"
+socket:
+  server_key: "blockforge-dev-key"
+session:
+  encryption_key: "blockforge-dev-session-encryption-key-32"
+  refresh_encryption_key: "blockforge-dev-refresh-key-32"
+runtime:
+  path: "/nakama/data/modules"
+  env:
+    - "TPX_PLATFORM_BASE_URL=http://terapixel-platform:8080"
+    - "TPX_INTERNAL_SERVICE_KEY=ci-internal-key"
