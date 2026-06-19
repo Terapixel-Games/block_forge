@@ -28,6 +28,8 @@ Fx="*res://addons/arcade_core/Fx.gd"
 AdManager="*res://addons/arcade_core/AdManager.gd"
 RunManager="*res://src/core/RunManager.gd"
 
+_mcp_game_helper="*res://addons/godot_ai/runtime/game_helper.gd"
+
 [display]
 
 window/size/viewport_width=1080
@@ -38,6 +40,11 @@ window/stretch/aspect="expand"
 window/handheld/orientation=1
 
 window/size/resizable=true
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_ai/plugin.cfg")
+
 [rendering]
 
 renderer/rendering_method="mobile"
