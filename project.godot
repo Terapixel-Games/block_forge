@@ -13,10 +13,10 @@ config_version=5
 config/name="Block Forge"
 run/main_scene="res://src/scenes/Boot.tscn"
 config/features=PackedStringArray("4.5", "Mobile")
-config/icon="res://icon.svg"
+config/icon="res://assets/marketing/app_icon_1024.png"
 boot_splash/use_filter=true
-boot_splash/fullsize=false
-boot_splash/image="res://assets/branding/splash.png"
+boot_splash/fullsize=true
+boot_splash/image="res://assets/marketing/startup_screen.png"
 boot_splash/bg_color=Color(0.015, 0.018, 0.026, 1)
 
 [autoload]
